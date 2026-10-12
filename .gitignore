@@ -1,0 +1,30 @@
+﻿# السكربتات المؤقتة والباتشات
+patch.txt
+update.py
+full_project_dump.txt
+tempCodeRunnerFile.py
+
+# الملفات التنفيذية والمكتبات الخارجية
+libs/
+mkvtoolnix-64-bit-102.0/
+installer_output/
+*.spec
+
+# ملفات البناء
+build/
+dist/
+
+# كاش بايثون
+__pycache__/
+*.py[cod]
+*.class
+*.tmp
+*.npz
+
+# ملفات الإعدادات والبيئة
+suite_config.json
+.vscode/
+.idea/
+
+libmpv-2.dll
+*.dll
