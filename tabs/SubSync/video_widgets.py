@@ -85,6 +85,7 @@ class VideoSurfaceGLWidget(QOpenGLWidget):
         self._render_ctx.render(
             flip_y=True,
             opengl_fbo={"w": w, "h": h, "fbo": int(self.defaultFramebufferObject())},
+            block_for_target_time=False,
         )
 
     def release_render_context(self):
@@ -138,10 +139,12 @@ class AspectRatioContainer(QWidget):
         self.child_widget.setGeometry(x, y, new_w, new_h)
 
 class GlobalKeyFilter(QObject):
-    def __init__(self, toggle_callback, seek_relative_callback):
+    def __init__(self, toggle_callback, seek_relative_callback, fullscreen_callback=None, escape_callback=None):
         super().__init__()
         self.toggle_callback = toggle_callback
         self.seek_relative_callback = seek_relative_callback
+        self.fullscreen_callback = fullscreen_callback
+        self.escape_callback = escape_callback
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress:
@@ -157,4 +160,11 @@ class GlobalKeyFilter(QObject):
             elif event.key() == Qt.Key_Left:
                 self.seek_relative_callback(-1.0)
                 return True
+            elif event.key() == Qt.Key_F and not (event.modifiers() & (Qt.ControlModifier | Qt.AltModifier)):
+                if self.fullscreen_callback:
+                    self.fullscreen_callback()
+                    return True
+            elif event.key() == Qt.Key_Escape:
+                if self.escape_callback and self.escape_callback():
+                    return True
         return super().eventFilter(obj, event)

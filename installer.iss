@@ -2,11 +2,13 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define AppName "SubSync"
-#define AppVersion "2.1"
+#define AppVersion "3.0"
 #define AppPublisher "ViolinMai"
 #define AppExeName "SubSync.exe"
 
 [Setup]
+; معرف فريد للبرنامج لتسهيل التحديث التلقائي وإلغاء التثبيت النظيف
+AppId={{D87C1D23-4C3D-4A44-A61F-1558E5E7A23A}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
@@ -15,12 +17,12 @@ DefaultGroupName={#AppName}
 AllowNoIcons=yes
 OutputDir=installer_output
 OutputBaseFilename=SubSync_v{#AppVersion}_Setup
-SetupIconFile=A:\LINUX-WIN\مستودع\ios_osd_sub.ico
+SetupIconFile=libs\icon.ico
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -30,25 +32,38 @@ Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "A:\LINUX-WIN\اكواد\Python\SubSync\dist\SubSync\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; نسخ مجلد dist الناتج عن PyInstaller
+Source: "A:\LINUX-WIN\Codes\Python\SubSync\dist\SubSync\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "A:\LINUX-WIN\مستودع\ios_osd_sub.ico"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "A:\LINUX-WIN\مستودع\ios_osd_sub.ico"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Registry]
-; إضافة خيار Open with SubSync لملفات الفيديو والترجمة والمجلدات عبر الـ Registry تلقائياً أثناء التثبيت
-Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\SubSync"; ValueType: string; ValueName: ""; ValueData: "Open with SubSync"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\SubSync"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExeName}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Directory\Background\shell\SubSync\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%V"""; Flags: uninsdeletekey
-
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync"; ValueType: string; ValueName: ""; ValueData: "Open with SubSync"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExeName}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""; Flags: uninsdeletekey
-
-Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync"; ValueType: string; ValueName: ""; ValueData: "Open with SubSync"; Flags: uninsdeletekey
+; 1. تكامل قائمة السياق المتفرعة لكافة الملفات (*)
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync"; ValueType: string; ValueName: "MUIVerb"; ValueData: "SubSync Suite"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync"; ValueType: string; ValueName: "SubCommands"; ValueData: ""; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExeName}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""; Flags: uninsdeletekey
+
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\shell\Studio"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Open in SubSync Studio"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\shell\Studio\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --tab studio ""%1"""; Flags: uninsdeletekey
+
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\shell\Merger"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Send to Subtitle Merger"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\shell\Merger\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --tab merger ""%1"""; Flags: uninsdeletekey
+
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\shell\MediaInfo"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Inspect with MediaInfo"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\SubSync\shell\MediaInfo\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --tab mediainfo ""%1"""; Flags: uninsdeletekey
+
+; 2. تكامل قائمة السياق للمجلدات (Directory)
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync"; ValueType: string; ValueName: "MUIVerb"; ValueData: "SubSync Suite"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync"; ValueType: string; ValueName: "SubCommands"; ValueData: ""; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExeName}"; Flags: uninsdeletekey
+
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync\shell\Merger"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Open Folder in Merger"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync\shell\Merger\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --tab merger ""%1"""; Flags: uninsdeletekey
+
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync\shell\Renamer"; ValueType: string; ValueName: "MUIVerb"; ValueData: "Bulk Rename Directory"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\SubSync\shell\Renamer\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" --tab renamer ""%1"""; Flags: uninsdeletekey
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent

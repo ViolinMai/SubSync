@@ -68,17 +68,17 @@ class MainMediaSuiteWindow(QMainWindow):
         self.resize(1280, 750)
         self.setAcceptDrops(True)
 
+        is_wayland = sys.platform.startswith("linux") and (
+            os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+            or bool(os.environ.get("WAYLAND_DISPLAY"))
+        )
         geom_hex = self.config.get("window_geometry", "")
-        if geom_hex:
+        if geom_hex and self.config.get("remember_geometry", True):
             try:
                 self.restoreGeometry(QByteArray.fromHex(geom_hex.encode("utf-8")))
             except Exception:
-                screen = QApplication.primaryScreen().availableGeometry()
-                self.move(
-                    (screen.width() - self.width()) // 2,
-                    (screen.height() - self.height()) // 2
-                )
-        else:
+                pass
+        elif not is_wayland:
             screen = QApplication.primaryScreen().availableGeometry()
             self.move(
                 (screen.width() - self.width()) // 2,
@@ -336,6 +336,8 @@ if __name__ == "__main__":
     QSurfaceFormat.setDefaultFormat(_fmt)
 
     app = QApplication(sys.argv)
+    app.setApplicationName("SubSync")
+    app.setDesktopFileName("SubSync")
     window = MainMediaSuiteWindow()
     window.show()
     sys.exit(app.exec())

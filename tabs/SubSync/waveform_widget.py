@@ -57,7 +57,8 @@ class WaveformWidget(QWidget):
         self._visible_elided_cache = {}
 
         self.auto_scroll_active = False
-        self.auto_scroll_global_anchor = QPoint()
+        self.auto_scroll_viewport_anchor = QPoint()
+        self.auto_scroll_viewport_current = QPoint()
         self.mouse_drag_mode = False
         self.sub_pixel_accumulator = 0.0
 
@@ -196,12 +197,25 @@ class WaveformWidget(QWidget):
             else:
                 super().wheelEvent(event)
 
+    def _get_scroll_area(self):
+        w = self.parentWidget()
+        while w and not isinstance(w, QScrollArea):
+            w = w.parentWidget()
+        return w
+
+    def _map_to_viewport(self, local_pt: QPoint) -> QPoint:
+        sa = self._get_scroll_area()
+        if sa:
+            return self.mapTo(sa.viewport(), local_pt)
+        return local_pt
+
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MiddleButton:
             if self.auto_scroll_active:
                 self._stop_auto_scroll()
             else:
-                self._start_auto_scroll(event.globalPosition().toPoint(), is_drag=True)
+                vp_pt = self._map_to_viewport(event.position().toPoint())
+                self._start_auto_scroll(vp_pt, is_drag=True)
             event.accept()
             return
         elif self.auto_scroll_active:
@@ -255,8 +269,8 @@ class WaveformWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MiddleButton and self.auto_scroll_active:
-            global_cur = event.globalPosition().toPoint()
-            if (global_cur - self.auto_scroll_global_anchor).manhattanLength() > 8:
+            vp_cur = self._map_to_viewport(event.position().toPoint())
+            if (vp_cur - self.auto_scroll_viewport_anchor).manhattanLength() > 8:
                 self._stop_auto_scroll()
             else:
                 self.mouse_drag_mode = False
@@ -273,6 +287,7 @@ class WaveformWidget(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.auto_scroll_active:
+            self.auto_scroll_viewport_current = self._map_to_viewport(event.position().toPoint())
             self._update_directional_cursor()
             self.update()
             event.accept()
@@ -288,10 +303,11 @@ class WaveformWidget(QWidget):
             self.set_current_time(target_sec)
             self.seek_requested.emit(target_sec)
 
-    def _start_auto_scroll(self, global_pos: QPoint, is_drag: bool = False):
+    def _start_auto_scroll(self, vp_pos: QPoint, is_drag: bool = False):
         self.auto_scroll_active = True
         self.mouse_drag_mode = is_drag
-        self.auto_scroll_global_anchor = global_pos
+        self.auto_scroll_viewport_anchor = vp_pos
+        self.auto_scroll_viewport_current = vp_pos
         self.sub_pixel_accumulator = 0.0
         self.setCursor(Qt.SizeHorCursor)
         self.auto_scroll_timer.start()
@@ -310,13 +326,10 @@ class WaveformWidget(QWidget):
 
     def _handle_auto_scroll(self):
         if not self.auto_scroll_active: return
-        scroll_area = self.parentWidget()
-        while scroll_area and not isinstance(scroll_area, QScrollArea):
-            scroll_area = scroll_area.parentWidget()
+        scroll_area = self._get_scroll_area()
         if not scroll_area: return
 
-        global_cur = QCursor.pos()
-        delta_x = global_cur.x() - self.auto_scroll_global_anchor.x()
+        delta_x = self.auto_scroll_viewport_current.x() - self.auto_scroll_viewport_anchor.x()
         deadzone = 12
 
         if abs(delta_x) > deadzone:
@@ -509,7 +522,8 @@ class WaveformWidget(QWidget):
 
         # 4. علامة السكرول بالزر الأوسط
         if self.auto_scroll_active:
-            local_anchor = self.mapFromGlobal(self.auto_scroll_global_anchor)
+            sa = self._get_scroll_area()
+            local_anchor = self.mapFrom(sa.viewport(), self.auto_scroll_viewport_anchor) if sa else self.auto_scroll_viewport_anchor
             p.setRenderHint(QPainter.Antialiasing)
             p.setPen(QPen(QColor(0, 164, 220, 220), 1.5))
             p.setBrush(QBrush(QColor(15, 15, 20, 200)))

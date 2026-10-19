@@ -96,7 +96,8 @@ class AutoScrollTableView(QTableView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.auto_scroll_active = False
-        self.auto_scroll_global_anchor = QPoint()
+        self.auto_scroll_anchor = QPoint()
+        self.auto_scroll_current = QPoint()
         self.mouse_drag_mode = False
         self.sub_pixel_accumulator = 0.0
 
@@ -109,7 +110,7 @@ class AutoScrollTableView(QTableView):
             if self.auto_scroll_active:
                 self._stop_auto_scroll()
             else:
-                self._start_auto_scroll(event.globalPosition().toPoint(), is_drag=True)
+                self._start_auto_scroll(event.position().toPoint(), is_drag=True)
             event.accept()
             return
         elif self.auto_scroll_active:
@@ -120,8 +121,8 @@ class AutoScrollTableView(QTableView):
 
     def mouseReleaseEvent(self, event: QMouseEvent):
         if event.button() == Qt.MiddleButton and self.auto_scroll_active:
-            global_cur = event.globalPosition().toPoint()
-            if (global_cur - self.auto_scroll_global_anchor).manhattanLength() > 8:
+            local_cur = event.position().toPoint()
+            if (local_cur - self.auto_scroll_anchor).manhattanLength() > 8:
                 self._stop_auto_scroll()
             else:
                 self.mouse_drag_mode = False
@@ -131,16 +132,18 @@ class AutoScrollTableView(QTableView):
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self.auto_scroll_active:
+            self.auto_scroll_current = event.position().toPoint()
             self._update_directional_cursor()
             self.viewport().update()
             event.accept()
             return
         super().mouseMoveEvent(event)
 
-    def _start_auto_scroll(self, global_pos: QPoint, is_drag: bool = False):
+    def _start_auto_scroll(self, local_pos: QPoint, is_drag: bool = False):
         self.auto_scroll_active = True
         self.mouse_drag_mode = is_drag
-        self.auto_scroll_global_anchor = global_pos
+        self.auto_scroll_anchor = local_pos
+        self.auto_scroll_current = local_pos
         self.sub_pixel_accumulator = 0.0
         self.setCursor(Qt.SizeVerCursor)
         self.scroll_timer.start()
@@ -155,8 +158,7 @@ class AutoScrollTableView(QTableView):
         self.viewport().update()
 
     def _update_directional_cursor(self):
-        global_cur = QCursor.pos()
-        delta_y = global_cur.y() - self.auto_scroll_global_anchor.y()
+        delta_y = self.auto_scroll_current.y() - self.auto_scroll_anchor.y()
         if abs(delta_y) <= 12:
             self.setCursor(Qt.SizeVerCursor)
         elif delta_y < 0:
@@ -166,8 +168,7 @@ class AutoScrollTableView(QTableView):
 
     def _handle_auto_scroll(self):
         if not self.auto_scroll_active: return
-        global_cur = QCursor.pos()
-        delta_y = global_cur.y() - self.auto_scroll_global_anchor.y()
+        delta_y = self.auto_scroll_current.y() - self.auto_scroll_anchor.y()
         deadzone = 12
 
         if abs(delta_y) > deadzone:
@@ -188,7 +189,7 @@ class AutoScrollTableView(QTableView):
     def paintEvent(self, event):
         super().paintEvent(event)
         if self.auto_scroll_active:
-            local_anchor = self.viewport().mapFromGlobal(self.auto_scroll_global_anchor)
+            local_anchor = self.auto_scroll_anchor
             painter = QPainter(self.viewport())
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setPen(QPen(QColor(0, 164, 220, 220), 1.5))

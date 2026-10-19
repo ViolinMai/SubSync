@@ -109,6 +109,11 @@ class SubSyncTab(QWidget):
         self.redo_stack = []
         self.last_applied_shift_ms = 0
         self.is_dirty = False
+        self._batch_dialog = None
+        self._calibrating_batch_dlg = None
+        self._calibration_accumulated_ms = 0
+        self._is_video_fullscreen = False
+        self._manual_list_override = None
 
         self.target_seek_time = None
         self.seek_timer = QTimer(self)
@@ -125,7 +130,12 @@ class SubSyncTab(QWidget):
         self._init_mpv()
         self._init_shortcuts()
 
-        self.key_filter = GlobalKeyFilter(self._toggle_playback, self._relative_seek)
+        self.key_filter = GlobalKeyFilter(
+            self._toggle_playback,
+            self._relative_seek,
+            self.toggle_video_fullscreen,
+            self._exit_video_fullscreen_if_active
+        )
         QApplication.instance().installEventFilter(self.key_filter)
 
     def _init_ui(self):
@@ -133,16 +143,37 @@ class SubSyncTab(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(6)
 
+        self.calibration_banner = QWidget(self)
+        self.calibration_banner.setStyleSheet("""
+            QWidget {
+                background-color: rgba(39, 174, 96, 0.18);
+                border: 1px solid #2ecc71;
+                border-radius: 6px;
+            }
+        """)
+        cal_layout = QHBoxLayout(self.calibration_banner)
+        cal_layout.setContentsMargins(10, 6, 10, 6)
+        self.lbl_cal_info = QLabel("🎯 Calibrating for Batch — Drag subtitles on waveform to set offset (0 ms)")
+        self.lbl_cal_info.setStyleSheet("color: #2ecc71; font-weight: bold; border: none; background: transparent;")
+        btn_finish_cal = QPushButton("✅ Apply Offset & Return to Batch")
+        btn_finish_cal.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 4px 12px; border: none;")
+        btn_finish_cal.clicked.connect(self._finish_batch_calibration)
+        cal_layout.addWidget(self.lbl_cal_info)
+        cal_layout.addStretch()
+        cal_layout.addWidget(btn_finish_cal)
+        self.calibration_banner.hide()
+        main_layout.addWidget(self.calibration_banner)
+
         self.main_v_splitter = QSplitter(Qt.Vertical)
         self.main_v_splitter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        main_layout.addWidget(self.main_v_splitter)
+        main_layout.addWidget(self.main_v_splitter, 1)
 
-        top_h_splitter = QSplitter(Qt.Horizontal)
-        top_h_splitter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self.top_h_splitter = QSplitter(Qt.Horizontal)
+        self.top_h_splitter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
-        table_container = QWidget()
-        table_container.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        table_layout = QVBoxLayout(table_container)
+        self.table_container = QWidget()
+        self.table_container.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        table_layout = QVBoxLayout(self.table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
         table_layout.setSpacing(4)
 
@@ -192,20 +223,22 @@ class SubSyncTab(QWidget):
         self.sub_table.clicked.connect(self._on_table_row_selected)
         self.sub_model.dataChanged.connect(self._on_model_data_changed)
         table_layout.addWidget(self.sub_table)
-        top_h_splitter.addWidget(table_container)
+        self.top_h_splitter.addWidget(self.table_container)
 
         self._use_native_wayland_gl = IS_LINUX and self._is_native_wayland_session()
         self.video_surface = VideoSurfaceGLWidget() if self._use_native_wayland_gl else VideoSurfaceWidget()
         self.video_surface.clicked.connect(self._toggle_playback)
         self.aspect_container = AspectRatioContainer(self.video_surface)
-        top_h_splitter.addWidget(self.aspect_container)
+        self.top_h_splitter.addWidget(self.aspect_container)
 
-        top_h_splitter.setSizes([500, 750])
-        self.main_v_splitter.addWidget(top_h_splitter)
+        self.top_h_splitter.setStretchFactor(0, 2)
+        self.top_h_splitter.setStretchFactor(1, 4)
+        self.top_h_splitter.setSizes([460, 780])
+        self.main_v_splitter.addWidget(self.top_h_splitter)
 
-        timeline_box = QWidget()
-        timeline_box.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        timeline_layout = QVBoxLayout(timeline_box)
+        self.timeline_box = QWidget()
+        self.timeline_box.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        timeline_layout = QVBoxLayout(self.timeline_box)
         timeline_layout.setContentsMargins(0, 0, 0, 0)
         timeline_layout.setSpacing(4)
 
@@ -230,15 +263,28 @@ class SubSyncTab(QWidget):
         self.scroll_area.viewport().installEventFilter(self)
 
         timeline_layout.addWidget(self.scroll_area)
-        self.main_v_splitter.addWidget(timeline_box)
-        self.main_v_splitter.setSizes([520, 220])
+        self.main_v_splitter.addWidget(self.timeline_box)
+        self.main_v_splitter.setStretchFactor(0, 3)
+        self.main_v_splitter.setStretchFactor(1, 2)
+        self.main_v_splitter.setSizes([500, 240])
 
-        self.status_label = QLabel(t("status_shortcuts"))
+        self.status_label = QLabel(t("status_shortcuts") + " | F: Fullscreen")
         self.status_label.setStyleSheet("color: #aaa; font-weight: bold; padding: 2px;")
         main_layout.addWidget(self.status_label)
 
-        controls = QHBoxLayout()
+        self.controls_container = QWidget()
+        controls = QHBoxLayout(self.controls_container)
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setSpacing(6)
         controls.setDirection(QHBoxLayout.LeftToRight)
+
+        self.btn_toggle_list = QPushButton("📋 List")
+        self.btn_toggle_list.setCheckable(True)
+        self.btn_toggle_list.setChecked(True)
+        self.btn_toggle_list.setFocusPolicy(Qt.NoFocus)
+        self.btn_toggle_list.setToolTip("Toggle Subtitle List Panel")
+        self.btn_toggle_list.clicked.connect(self._on_manual_toggle_list)
+        controls.addWidget(self.btn_toggle_list)
 
         btn_open_vid = QPushButton(t("open_video"))
         btn_open_vid.setFocusPolicy(Qt.NoFocus)
@@ -250,14 +296,16 @@ class SubSyncTab(QWidget):
         btn_open_sub.clicked.connect(self._browse_sub)
         controls.addWidget(btn_open_sub)
 
-        controls.addWidget(QLabel("🎧 Audio:"))
+        self.lbl_audio = QLabel("🎧")
+        controls.addWidget(self.lbl_audio)
         self.audio_combo = QComboBox()
         self.audio_combo.setFocusPolicy(Qt.NoFocus)
-        self.audio_combo.setMinimumWidth(130)
+        self.audio_combo.setMinimumWidth(90)
         self.audio_combo.currentIndexChanged.connect(self._on_audio_track_changed)
         controls.addWidget(self.audio_combo)
 
-        controls.addWidget(QLabel(t("link_mode")))
+        self.lbl_link = QLabel(t("link_mode"))
+        controls.addWidget(self.lbl_link)
         self.link_combo = QComboBox()
         self.link_combo.setFocusPolicy(Qt.NoFocus)
         self.link_combo.addItems([t("link_none"), t("link_all"), t("link_following")])
@@ -266,7 +314,8 @@ class SubSyncTab(QWidget):
         self.link_combo.currentIndexChanged.connect(self._on_link_mode_changed)
         controls.addWidget(self.link_combo)
 
-        controls.addWidget(QLabel(t("speed")))
+        self.lbl_speed = QLabel(t("speed"))
+        controls.addWidget(self.lbl_speed)
         self.speed_combo = QComboBox()
         self.speed_combo.setFocusPolicy(Qt.NoFocus)
         self.speed_combo.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
@@ -290,13 +339,15 @@ class SubSyncTab(QWidget):
         self.chk_keep_styles.setFocusPolicy(Qt.NoFocus)
         controls.addWidget(self.chk_keep_styles)
 
-        controls.addWidget(QLabel(t("encoding")))
+        self.lbl_enc = QLabel(t("encoding"))
+        controls.addWidget(self.lbl_enc)
         self.encoding_combo = QComboBox()
         self.encoding_combo.setFocusPolicy(Qt.NoFocus)
         self.encoding_combo.addItems(["utf-8-sig", "utf-8", "cp1256", "latin-1"])
         controls.addWidget(self.encoding_combo)
 
-        controls.addWidget(QLabel(t("format")))
+        self.lbl_fmt = QLabel(t("format"))
+        controls.addWidget(self.lbl_fmt)
         self.format_combo = QComboBox()
         self.format_combo.setFocusPolicy(Qt.NoFocus)
         self.format_combo.addItems([t("keep_original"), ".ass", ".srt", ".vtt"])
@@ -314,7 +365,78 @@ class SubSyncTab(QWidget):
         controls.addWidget(self.save_as_btn)
 
         controls.addStretch()
-        main_layout.addLayout(controls)
+        main_layout.addWidget(self.controls_container)
+
+        self._secondary_control_widgets = [
+            self.lbl_speed, self.speed_combo,
+            self.btn_info, self.chk_keep_styles,
+            self.lbl_enc, self.encoding_combo,
+            self.lbl_fmt, self.format_combo,
+            self.save_as_btn
+        ]
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_dynamic_responsive_layout()
+
+    def _on_manual_toggle_list(self, checked: bool):
+        self._manual_list_override = checked
+        self.table_container.setVisible(checked)
+
+    def _apply_dynamic_responsive_layout(self):
+        if self._is_video_fullscreen:
+            return
+        w = self.width()
+        h = max(1, self.height())
+        aspect = w / float(h)
+
+        # في حال التايلنق (Hyprland نصف شاشة أو مربع): نخفي القائمة اليسرى تلقائياً للتركيز على الفيديو والويف فورم
+        is_compact_or_square = (w < 960) or (aspect < 1.35)
+        if self._manual_list_override is None:
+            self.table_container.setVisible(not is_compact_or_square)
+            self.btn_toggle_list.setChecked(not is_compact_or_square)
+        else:
+            if w >= 1200 and aspect >= 1.5 and self._manual_list_override:
+                self.table_container.setVisible(True)
+
+        # إخفاء عناصر التحكم الثانوية عند ضيق العرض لمنع قص الأزرار الأساسية
+        hide_secondary = w < 1100
+        for widget in getattr(self, "_secondary_control_widgets", []):
+            widget.setVisible(not hide_secondary)
+
+        self.lbl_link.setVisible(w >= 780)
+
+    def toggle_video_fullscreen(self):
+        main_win = self.window()
+        if hasattr(main_win, "tabs") and main_win.tabs.currentWidget() != self:
+            return
+
+        self._is_video_fullscreen = not self._is_video_fullscreen
+        if self._is_video_fullscreen:
+            self.table_container.hide()
+            self.timeline_box.hide()
+            self.status_label.hide()
+            self.controls_container.hide()
+            self.calibration_banner.hide()
+            if hasattr(main_win, "tabs"):
+                main_win.tabs.tabBar().hide()
+            main_win.showFullScreen()
+        else:
+            main_win.showNormal()
+            if hasattr(main_win, "tabs"):
+                main_win.tabs.tabBar().show()
+            self.timeline_box.show()
+            self.status_label.show()
+            self.controls_container.show()
+            if self._calibrating_batch_dlg is not None:
+                self.calibration_banner.show()
+            self._apply_dynamic_responsive_layout()
+
+    def _exit_video_fullscreen_if_active(self) -> bool:
+        if self._is_video_fullscreen:
+            self.toggle_video_fullscreen()
+            return True
+        return False
 
     def eventFilter(self, obj, event):
         if hasattr(self, 'scroll_area') and obj == self.scroll_area.viewport():
@@ -771,6 +893,12 @@ class SubSyncTab(QWidget):
         self._sync_subtitles_to_player()
         self._maybe_auto_save()
 
+        if self._calibrating_batch_dlg is not None:
+            self._calibration_accumulated_ms += delta_ms
+            self.lbl_cal_info.setText(
+                f"🎯 Calibrating for Batch — Accumulated Shift: {self._calibration_accumulated_ms:+d} ms"
+            )
+
     def _on_table_row_selected(self, index):
         row = index.row()
         if self.subs_data and 0 <= row < len(self.subs_data.events):
@@ -932,6 +1060,26 @@ class SubSyncTab(QWidget):
             except Exception as e:
                 logger.error(f"Auto-save failed: {e}")
 
+    def start_batch_calibration(self, sub_path: str, video_path: str, batch_dlg):
+        self._calibrating_batch_dlg = batch_dlg
+        self._calibration_accumulated_ms = 0
+        self.lbl_cal_info.setText("🎯 Calibrating for Batch — Drag subtitles on waveform to set offset (0 ms)")
+        self.calibration_banner.show()
+        self.load_subtitles(sub_path)
+        if video_path:
+            self.load_video(video_path)
+
+    def _finish_batch_calibration(self):
+        dlg = self._calibrating_batch_dlg
+        self.calibration_banner.hide()
+        self._calibrating_batch_dlg = None
+        if dlg is not None:
+            if self._calibration_accumulated_ms != 0:
+                dlg.spin_ms.setValue(self._calibration_accumulated_ms)
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
+
     def _open_batch_dialog(self):
         default_folder = ""
         if self.video_path and os.path.exists(self.video_path):
@@ -939,13 +1087,22 @@ class SubSyncTab(QWidget):
         elif self.sub_path and os.path.exists(self.sub_path):
             default_folder = str(Path(self.sub_path).parent)
 
-        dlg = BatchTimingDialog(
-            initial_shift_ms=self.last_applied_shift_ms,
-            keep_styles_default=self.chk_keep_styles.isChecked(),
-            default_video_folder=default_folder,
-            parent=self
-        )
-        dlg.exec()
+        if self._batch_dialog is None:
+            self._batch_dialog = BatchTimingDialog(
+                initial_shift_ms=self.last_applied_shift_ms,
+                keep_styles_default=self.chk_keep_styles.isChecked(),
+                default_video_folder=default_folder,
+                parent=self
+            )
+        else:
+            if default_folder:
+                self._batch_dialog.default_video_folder = default_folder
+            if self.last_applied_shift_ms != 0 and self._batch_dialog.spin_ms.value() == 0:
+                self._batch_dialog.spin_ms.setValue(self.last_applied_shift_ms)
+
+        self._batch_dialog.show()
+        self._batch_dialog.raise_()
+        self._batch_dialog.activateWindow()
 
     def _browse_video(self):
         f, _ = QFileDialog.getOpenFileName(self, t("open_video"), "", "Videos (*.mp4 *.mkv *.avi *.mov *.webm)")

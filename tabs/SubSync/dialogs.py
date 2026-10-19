@@ -609,21 +609,8 @@ class BatchTimingDialog(QDialog):
                 matched_video = chosen_vid
 
         if self.parent_tab:
-            self.parent_tab.load_subtitles(selected_sub)
-            if matched_video:
-                self.parent_tab.load_video(matched_video)
-
-            def on_calibrated(shift_diff):
-                if shift_diff != 0:
-                    self.spin_ms.setValue(shift_diff)
-                    QMessageBox.information(self, t("notice"), t("sync_back_success"))
-                try:
-                    self.parent_tab.waveform.subtitle_changed.disconnect(on_calibrated)
-                except Exception:
-                    pass
-
-            self.parent_tab.waveform.subtitle_changed.connect(on_calibrated)
-            self.close()
+            self.parent_tab.start_batch_calibration(selected_sub, matched_video, self)
+            self.hide()
 
     def _apply_batch(self):
         subs_only = [p for p in self.file_paths if p.suffix.lower() in ('.srt', '.ass', '.ssa', '.vtt')]
